@@ -115,8 +115,8 @@ public class SyncMojo extends AbstractMojo {
 	@Parameter(property = "altReleaseDeploymentRepository")
 	private String altReleaseDeploymentRepository;
 
-	@Parameter(name = "fromScratch", property = "fromScratch")
-	private boolean fromScratch;
+	@Parameter(name = "noResolveIndex", property = "noResolveIndex")
+	private boolean noResolveIndex;
 
 	@Parameter(name = "noDeployIndex", property = "noDeployIndex")
 	private boolean noDeployIndex;
@@ -327,7 +327,7 @@ public class SyncMojo extends AbstractMojo {
 			Artifact indexMetadataArtifact = new DefaultArtifact(indexGroupId, indexArtifactId, Artifact.LATEST_VERSION,
 					"import", "pom", "", artifactHandlerManager.getArtifactHandler("pom"));
 
-			if (!fromScratch) {
+			if (!noResolveIndex) {
 				try {
 					indexMetadataArtifact = context.resolve(indexMetadataArtifact);
 					ArtifactRepositoryMetadata metaMeta = new ArtifactRepositoryMetadata(indexMetadataArtifact);
