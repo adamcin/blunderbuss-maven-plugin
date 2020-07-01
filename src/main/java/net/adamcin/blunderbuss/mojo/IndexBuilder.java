@@ -55,6 +55,8 @@ public class IndexBuilder {
 
 	private final Context context;
 
+	private volatile boolean dirty;
+
 	public IndexBuilder(
 			@NotNull final Path indexDir,
 			@NotNull final Artifact indexBuilderArtifact,
@@ -113,7 +115,7 @@ public class IndexBuilder {
 			final Map<Path, Artifact> deployables = artifactGroup.getDeployables().entrySet().stream()
 					.filter(entry -> !indexed.contains(entry.getKey()))
 					.collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-			boolean doSave = true;
+			boolean doSave = !deployables.isEmpty();
 			try {
 				if (!deployables.isEmpty()) {
 					context.deploy(deployables.values());
@@ -141,6 +143,7 @@ public class IndexBuilder {
 					Files.createDirectories(indexFile.getParent());
 				}
 				Files.write(indexFile, indexed.stream().map(Path::toString).collect(Collectors.toList()), StandardCharsets.UTF_8);
+				dirty = true;
 			}
 		};
 	}
@@ -157,7 +160,7 @@ public class IndexBuilder {
 	Completable finishAndUpload(final boolean noUpload) {
 		return JarUtils.createJarFile(indexBuilderArtifact.getFile(), indexDir)
 				.andThen(Completable.create(emitter -> {
-					if (!noUpload) {
+					if (dirty && !noUpload) {
 						context.deploy(this.getArtifacts());
 					}
 					emitter.onComplete();

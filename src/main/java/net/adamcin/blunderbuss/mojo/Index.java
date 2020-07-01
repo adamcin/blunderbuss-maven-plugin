@@ -67,7 +67,11 @@ public class Index {
 					List<String> lines = IOUtils.readLines(indexReader);
 					List<Path> contents = lines.stream().map(Paths::get).collect(Collectors.toList());
 					final ArtifactGroup newGroup = artifactGroup.filteredByIndex(contents);
-					return Flowable.just(newGroup);
+					if (newGroup.getDeployables().isEmpty()) {
+						return Flowable.empty();
+					} else {
+						return Flowable.just(newGroup);
+					}
 				} catch (Exception e) {
 					log.info("failed to read index for artifact group: " + artifactGroup.getLayoutPrefix().toString(), e);
 				}

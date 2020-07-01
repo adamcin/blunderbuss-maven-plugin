@@ -61,12 +61,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -126,6 +129,18 @@ public class SyncMojo extends AbstractMojo {
 
 	@Parameter(name = "indexArtifactId", property = "indexArtifactId", required = true)
 	private String indexArtifactId;
+
+	/**
+	 * Comma separated list of groupId:artifactId coordinates for other indexes managed in the same
+	 * deployment repository that will be used as additional filters after the index specified with
+	 * {@code indexGroupId} and {@code indexArtifactId}. Each coordinate will be trimmed to nil so
+	 * that newlines are tolerated in the configuration element in the pom.
+	 * <p>
+	 * You may omit the groupId portion, leaving only a colon prefix, in which case the {@code indexGroupId}
+	 * parameter will be assumed.
+	 */
+	@Parameter(name = "altIndex", property = "altIndex")
+	private String altIndex;
 
 	@Parameter(property = "blunderbuss.tmpdir")
 	private File tempDir;
@@ -287,8 +302,11 @@ public class SyncMojo extends AbstractMojo {
 	 *
 	 * @return stream of GAV-grouped artifacts
 	 */
-	Flowable<ArtifactGroup> getDeployableArtifacts(@NotNull final Index index) {
-		return index.filterByIndex(getArtifactGroups().toFlowable(BackpressureStrategy.BUFFER))
+	Flowable<ArtifactGroup> getDeployableArtifacts(@NotNull final Index index, @NotNull final List<Index> altIndexes) {
+		return Observable.concat(Observable.just(index), Observable.fromIterable(altIndexes))
+				.reduce(getArtifactGroups().toFlowable(BackpressureStrategy.BUFFER), (flow, idx) -> idx.filterByIndex(flow))
+				.toFlowable()
+				.flatMap(Functions.identity())
 				.map(group -> group.findDeployables(artifactHandlerManager));
 	}
 
@@ -321,23 +339,31 @@ public class SyncMojo extends AbstractMojo {
 	}
 
 	Single<Index> getIndex(@NotNull final Context context) {
+		return internalGetIndex(context, indexGroupId, indexArtifactId, !noResolveIndex);
+	}
+
+	Single<Index> internalGetIndex(
+			@NotNull final Context context,
+			@NotNull final String groupId,
+			@NotNull final String artifactId,
+			final boolean doResolve) {
 		return Single.create(emitter -> {
-			Artifact indexArtifact = new DefaultArtifact(indexGroupId, indexArtifactId, Artifact.LATEST_VERSION,
+			Artifact indexArtifact = new DefaultArtifact(groupId, artifactId, Artifact.LATEST_VERSION,
 					"test", "jar", "", artifactHandlerManager.getArtifactHandler("jar"));
 			Artifact indexMetadataArtifact = new DefaultArtifact(indexGroupId, indexArtifactId, Artifact.LATEST_VERSION,
 					"import", "pom", "", artifactHandlerManager.getArtifactHandler("pom"));
 
-			if (!noResolveIndex) {
+			if (doResolve) {
 				try {
 					indexMetadataArtifact = context.resolve(indexMetadataArtifact);
 					ArtifactRepositoryMetadata metaMeta = new ArtifactRepositoryMetadata(indexMetadataArtifact);
 					indexMetadataArtifact.addMetadata(metaMeta);
 					indexArtifact.addMetadata(metaMeta);
 					indexArtifact = context.resolve(indexArtifact);
-					getLog().info("resolved index file to " + indexArtifact.getFile());
+					context.getLog().info("resolved index file to " + indexArtifact.getFile());
 				} catch (Exception e) {
-					getLog().warn("failed to resolve latest index: " + indexArtifact.toString());
-					getLog().debug("failed to resolve latest index: " + indexArtifact.toString(), e);
+					context.getLog().warn("failed to resolve latest index: " + indexArtifact.toString());
+					context.getLog().debug("failed to resolve latest index: " + indexArtifact.toString(), e);
 				}
 			}
 
@@ -345,12 +371,35 @@ public class SyncMojo extends AbstractMojo {
 		});
 	}
 
+	Single<List<Index>> getAltIndexes(@NotNull final Context context) {
+		if (StringUtils.isBlank(altIndex)) {
+			return Single.just(Collections.emptyList());
+		} else {
+			return Observable.fromStream(Arrays.stream(altIndex.split(",")))
+					.filter(part -> part.contains(":"))
+					.map(String::trim)
+					.flatMap(coords -> {
+						final String[] elements = coords.split(":");
+						final String groupId = StringUtils.isNotEmpty(elements[0]) ? elements[0] : indexGroupId;
+						final String artifactId = elements[1];
+						if (groupId.equals(indexGroupId) && artifactId.equals(indexArtifactId)) {
+							return Observable.empty();
+						} else {
+							return internalGetIndex(context, groupId, artifactId, true)
+									.toObservable();
+						}
+					})
+					.collect(Collectors.toList());
+		}
+	}
+
 	Completable doExecute() {
 		return getContext()
 				.flatMap(context -> getIndex(context)
 						.flatMap(index -> IndexBuilder.fromIndex(index, context)
-								.map(indexBuilder -> indexBuilder.buildIndexFrom(getDeployableArtifacts(index))
-										.andThen(indexBuilder.finishAndUpload(noDeployIndex)))))
+								.flatMap(indexBuilder -> getAltIndexes(context)
+										.map(altIndexes -> indexBuilder.buildIndexFrom(getDeployableArtifacts(index, altIndexes))
+												.andThen(indexBuilder.finishAndUpload(noDeployIndex))))))
 				.flatMapCompletable(Functions.identity());
 	}
 
