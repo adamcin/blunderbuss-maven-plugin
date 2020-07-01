@@ -72,8 +72,8 @@ import java.util.stream.Stream;
 /**
  * Upload the local repository cache.
  */
-@Mojo(name = "blunderbuss", requiresProject = false, inheritByDefault = false, aggregator = true, requiresOnline = true)
-public class BlunderbussMojo extends AbstractMojo {
+@Mojo(name = "sync", requiresProject = false, inheritByDefault = false, aggregator = true, requiresOnline = true)
+public class SyncMojo extends AbstractMojo {
 	private static final Pattern ALT_REPO_SYNTAX_PATTERN = Pattern.compile("(.+)::(.+)");
 
 	@Parameter(defaultValue = "${settings}", readonly = true)
@@ -109,7 +109,7 @@ public class BlunderbussMojo extends AbstractMojo {
 	 * could be <code>default</code> (ie. Maven 2) or <code>legacy</code> (ie. Maven 1), but since 3.0.0 the layout part
 	 * has been removed because Maven 3 only supports Maven 2 repository layout.
 	 *
-	 * @see BlunderbussMojo#altDeploymentRepository
+	 * @see SyncMojo#altDeploymentRepository
 	 * @since 2.8
 	 */
 	@Parameter(property = "altReleaseDeploymentRepository")
