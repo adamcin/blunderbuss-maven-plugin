@@ -1,0 +1,128 @@
+/*
+ * Copyright 2020 Mark Adamcin
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package net.adamcin.blunderbuss.mojo;
+
+import org.apache.maven.artifact.Artifact;
+import org.apache.maven.artifact.DefaultArtifact;
+import org.apache.maven.artifact.handler.manager.ArtifactHandlerManager;
+import org.jetbrains.annotations.NotNull;
+
+import java.io.FilenameFilter;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+public final class ArtifactGroup {
+	private final Path layoutPrefix;
+
+	private final Artifact pomArtifact;
+
+	private final Map<Path, Artifact> deployables;
+
+	private final Set<Path> indexed;
+
+	public ArtifactGroup(@NotNull final Path layoutPrefix, @NotNull final Artifact pomArtifact) {
+		this(layoutPrefix, pomArtifact, Collections.emptyMap(), Collections.emptySet());
+	}
+
+	public ArtifactGroup(
+			@NotNull final Path layoutPrefix,
+			@NotNull final Artifact pomArtifact,
+			@NotNull final Map<Path, Artifact> deployables,
+			@NotNull final Set<Path> indexed) {
+		this.layoutPrefix = layoutPrefix;
+		this.pomArtifact = pomArtifact;
+		this.deployables = Collections.unmodifiableMap(deployables);
+		this.indexed = Collections.unmodifiableSet(indexed);
+	}
+
+	public Path getLayoutPrefix() {
+		return layoutPrefix;
+	}
+
+	public Path getIndexFileRelPath() {
+		return layoutPrefix.getParent().resolve(layoutPrefix.getFileName().toString() + ".txt");
+	}
+
+	public String getFilenamePrefix() {
+		return pomArtifact.getArtifactId() + "-" + pomArtifact.getVersion();
+	}
+
+	public Artifact getPomArtifact() {
+		return pomArtifact;
+	}
+
+	public Map<Path, Artifact> getDeployables() {
+		return deployables;
+	}
+
+	public Set<Path> getIndexed() {
+		return indexed;
+	}
+
+	public ArtifactGroup findDeployables(@NotNull final ArtifactHandlerManager artifactHandlerManager) {
+		final Map<Path, Artifact> newDeployables = new LinkedHashMap<>(this.deployables);
+		final Path pomFilename = pomArtifact.getFile().toPath().getFileName();
+		if (!newDeployables.containsKey(pomFilename) && !indexed.contains(pomFilename)) {
+			newDeployables.put(pomFilename, pomArtifact);
+		}
+		final String pomFileName = pomArtifact.getFile().getName();
+		final String prefix = pomArtifact.getArtifactId() + "-" + pomArtifact.getVersion();
+		final FilenameFilter filter = (dir, name) -> !name.equals(pomFileName) && name.startsWith(prefix);
+		Arrays.stream(pomArtifact.getFile().getParentFile().listFiles(filter))
+				.filter(other -> !indexed.contains(other.toPath().getFileName()) && !other.getName().endsWith(".lastUpdated"))
+				.map(other -> {
+					final String suffix = other.getName().substring(prefix.length());
+					final int firstPeriod = suffix.indexOf('.');
+					final String type = suffix.substring(firstPeriod + 1);
+					final String classifier = firstPeriod > 0 && suffix.startsWith("-") ? suffix.substring(1, firstPeriod) : "";
+					final DefaultArtifact artifact = new DefaultArtifact(pomArtifact.getGroupId(), pomArtifact.getArtifactId(),
+							pomArtifact.getVersion(), "compile", type, classifier, artifactHandlerManager.getArtifactHandler(type));
+					artifact.setFile(other);
+					pomArtifact.getMetadataList().forEach(artifact::addMetadata);
+					return artifact;
+				}).forEachOrdered(artifact -> newDeployables.put(artifact.getFile().toPath().getFileName(), artifact));
+		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, newDeployables, this.indexed);
+	}
+
+	public ArtifactGroup filteredByIndex(@NotNull final List<Path> indexed) {
+		final Map<Path, Artifact> newDeployables = new LinkedHashMap<>(this.deployables);
+		final Set<Path> newIndexed = new HashSet<>(this.indexed);
+		for (Path indexPath : indexed) {
+			newIndexed.add(indexPath);
+			if (newDeployables.containsKey(indexPath)) {
+				newDeployables.remove(indexPath);
+			}
+		}
+		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, newDeployables, newIndexed);
+	}
+
+	@Override
+	public String toString() {
+		return "ArtifactGroup{" +
+				"layoutPrefix=" + layoutPrefix +
+				", pomArtifact=" + pomArtifact +
+				", deployables=" + deployables +
+				", indexed=" + indexed +
+				'}';
+	}
+}

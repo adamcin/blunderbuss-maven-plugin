@@ -1,5 +1,5 @@
 <!--
-  ~ Copyright 2018 Mark Adamcin
+  ~ Copyright 2020 Mark Adamcin
   ~
   ~ Licensed under the Apache License, Version 2.0 (the "License");
   ~ you may not use this file except in compliance with the License.
@@ -23,8 +23,8 @@
     <googleAnalyticsAccountId>UA-37073514-1</googleAnalyticsAccountId>
 
     <bannerLeft>
-        <name>Maven Mirror Maker - Plugin to rsync artifacts to maintain mirrors in simple cloud artifact repositories.</name>
-        <href>http://adamcin.net/maven-mirror-maker/index.html</href>
+        <name>Blunderbuss Maven Plugin - Fire off all your cached artifacts to a remote maven repository.</name>
+        <href>http://adamcin.net/blunderbuss-maven-plugin/index.html</href>
     </bannerLeft>
 
     <publishDate position="left" format="yyyy-MM-dd HH:mm" />
@@ -35,18 +35,19 @@
 
     <body>
         <links>
-            <item name="Wiki" href="http://wiki.github.com/adamcin/maven-mirror-maker/"/>
-            <item name="FAQ" href="http://wiki.github.com/adamcin/maven-mirror-maker/frequently-asked-questions"/>
+            <item name="Wiki" href="http://wiki.github.com/adamcin/blunderbuss-maven-plugin/"/>
+            <item name="FAQ" href="http://wiki.github.com/adamcin/blunderbuss-maven-plugin/frequently-asked-questions"/>
         </links>
         <menu name="Overview">
             <item name="Introduction" href="index.html" />
+            <item name="Goals" href="plugin-info.html" />
+            <item name="Usage" href="usage.html" />
+            <item name="JavaDocs" href="apidocs/index.html" />
         </menu>
-        <menu ref="modules" inherit="bottom"/>
         <menu name="Resources @ Github" inherit="bottom">
-            <item name="Get the Source" href="https://github.com/adamcin/maven-mirror-maker"/>
-            <item name="Report Issues" href="https://github.com/adamcin/maven-mirror-maker/issues"/>
+            <item name="Get the Source" href="https://github.com/adamcin/blunderbuss-maven-plugin"/>
+            <item name="Report Issues" href="https://github.com/adamcin/blunderbuss-maven-plugin/issues"/>
         </menu>
         <menu ref="reports" inherit="bottom"/>
-
     </body>
 </project>
