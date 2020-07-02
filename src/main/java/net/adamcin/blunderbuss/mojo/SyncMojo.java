@@ -34,6 +34,7 @@ import org.apache.maven.artifact.repository.ArtifactRepositoryPolicy;
 import org.apache.maven.artifact.repository.layout.ArtifactRepositoryLayout;
 import org.apache.maven.artifact.repository.metadata.ArtifactRepositoryMetadata;
 import org.apache.maven.execution.MavenSession;
+import org.apache.maven.model.Build;
 import org.apache.maven.model.DeploymentRepository;
 import org.apache.maven.model.DistributionManagement;
 import org.apache.maven.model.Repository;
@@ -73,7 +74,17 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Upload the local repository cache.
+ * Upload the local repository cache to a specific deployment repository. Unlike the standard maven deploy goals, this goal is tolerant of
+ * situations where an attempt is made to re-deploy a release artifact to a repository where it already exists. SNAPSHOT artifacts are ignored
+ * <p>
+ * In general, this goal should be executed by itself, either standalone after carefully populating a local maven repository, or by a CI build agent
+ * in a maven project directory after running mvn install for all project modules, so that all new dependencies that are resolved from upstream
+ * repositories can be redeployed to the primary cloud artifact feed.
+ * <p>
+ * This goal makes use of simple index jars deployed to (and resolved from) the target repository to keep track of which artifacts have been
+ * uploaded or which have been determined to already be present, so that reattempts can be avoided on subsequent executions. When different CI
+ * pipelines are deploying to the same repository, use a different {@code indexArtifactId} value for each pipeline and include all the values as
+ * elements in {@code altIndex} so that they cross reference each other while avoiding duplication of index entries.
  */
 @Mojo(name = "sync", requiresProject = false, inheritByDefault = false, aggregator = true, requiresOnline = true)
 public class SyncMojo extends AbstractMojo {
@@ -118,15 +129,29 @@ public class SyncMojo extends AbstractMojo {
 	@Parameter(property = "altReleaseDeploymentRepository")
 	private String altReleaseDeploymentRepository;
 
+	/**
+	 * Set to true to skip resolution of the latest index, which effectively forces the index to be rebuilt
+	 * from scratch. This does not prevent the index artifacts specified with {@code altIndex} from being resolved.
+	 */
 	@Parameter(name = "noResolveIndex", property = "noResolveIndex")
 	private boolean noResolveIndex;
 
+	/**
+	 * Set to true to skip upload of the new index.
+	 */
 	@Parameter(name = "noDeployIndex", property = "noDeployIndex")
 	private boolean noDeployIndex;
 
+	/**
+	 * Specify the groupId of the index that is resolved and deployed by this execution. This also serves as the
+	 * default for {@code altIndex} elements that omit the groupId part.
+	 */
 	@Parameter(name = "indexGroupId", property = "indexGroupId", required = true)
 	private String indexGroupId;
 
+	/**
+	 * Specify the artifactId of the index that is resolved and deployed by this execution.
+	 */
 	@Parameter(name = "indexArtifactId", property = "indexArtifactId", required = true)
 	private String indexArtifactId;
 
@@ -134,17 +159,25 @@ public class SyncMojo extends AbstractMojo {
 	 * Comma separated list of groupId:artifactId coordinates for other indexes managed in the same
 	 * deployment repository that will be used as additional filters after the index specified with
 	 * {@code indexGroupId} and {@code indexArtifactId}. Each coordinate will be trimmed to nil so
-	 * that newlines are tolerated in the configuration element in the pom.
-	 * <p>
-	 * You may omit the groupId portion, leaving only a colon prefix, in which case the {@code indexGroupId}
+	 * that newlines are tolerated in the configuration element in the pom. You may omit the groupId
+	 * portion, leaving only a colon prefix, in which case the {@code indexGroupId}
 	 * parameter will be assumed.
 	 */
 	@Parameter(name = "altIndex", property = "altIndex")
 	private String altIndex;
 
-	@Parameter(property = "blunderbuss.tmpdir")
-	private File tempDir;
+	/**
+	 * Specify a directory parent path for temporary files. If not specified, the plugin will use
+	 * {@code project.build.directory} if executed in a maven module directory, or otherwise it
+	 * will use {@code java.io.tmpdir}.
+	 */
+	@Parameter(name = "tempDirectory", property = "blunderbuss.tempDirectory")
+	private File tempDirectory;
 
+	/**
+	 * This can be used for testing configurations against a throwaway deployment repository to avoid having
+	 * to wait for all artifacts to be uploaded for every iteration.
+	 */
 	@Parameter(property = "blunderbuss.limitArtifactCount")
 	private long limitArtifactCount;
 
@@ -320,17 +353,19 @@ public class SyncMojo extends AbstractMojo {
 	Single<Context> getContext() {
 		return getReleaseDeploymentRepository()
 				.flatMap(deployRepo -> getWrappedProjectBuildingRequest(deployRepo)
-						.flatMap(buildRequest -> getTempDir()
+						.flatMap(buildRequest -> getTempDirectory()
 								.map(tempDir -> new Context(artifactResolver, artifactDeployer,
 										deployRepo, buildRequest, tempDir.toAbsolutePath(), getLog()))));
 	}
 
-	Single<Path> getTempDir() {
+	Single<Path> getTempDirectory() {
 		return Single.create(emitter -> {
-			if (tempDir != null) {
-				emitter.onSuccess(Files.createTempDirectory(tempDir.toPath(), "blunderbuss_"));
+			if (tempDirectory != null) {
+				emitter.onSuccess(Files.createTempDirectory(tempDirectory.toPath(), "blunderbuss_"));
 			} else if (project != null) {
-				final Path projectTempDir = project.getBasedir().toPath().resolve("target/blunderbussTmp");
+				final Path projectTempDir = project.getBasedir().toPath().resolve(
+						Optional.ofNullable(project.getBuild()).map(Build::getDirectory).orElse("target"))
+						.resolve("blunderbussTmp");
 				emitter.onSuccess(Files.createDirectories(projectTempDir));
 			} else {
 				emitter.onSuccess(Files.createTempDirectory("blunderbuss_"));
