@@ -42,7 +42,7 @@ public final class ArtifactGroup {
 
 	private final Set<Path> indexed;
 
-	private final boolean failOnError;
+	private final boolean terminateOnFailure;
 
 	public ArtifactGroup(@NotNull final Path layoutPrefix, @NotNull final Artifact pomArtifact) {
 		this(layoutPrefix, pomArtifact, Collections.emptyMap(), Collections.emptySet(), false);
@@ -53,13 +53,13 @@ public final class ArtifactGroup {
 			@NotNull final Artifact pomArtifact,
 			@NotNull final Map<Path, Artifact> deployables,
 			@NotNull final Set<Path> indexed,
-			final boolean failOnError) {
+			final boolean terminateOnFailure) {
 		this.layoutPrefix = layoutPrefix;
 		this.pomArtifact = pomArtifact;
 		this.gav = Gav.fromArtifact(pomArtifact);
 		this.deployables = Collections.unmodifiableMap(deployables);
 		this.indexed = Collections.unmodifiableSet(indexed);
-		this.failOnError = failOnError;
+		this.terminateOnFailure = terminateOnFailure;
 	}
 
 	public Path getLayoutPrefix() {
@@ -90,8 +90,8 @@ public final class ArtifactGroup {
 		return indexed;
 	}
 
-	public boolean isFailOnError() {
-		return failOnError;
+	public boolean isTerminateOnFailure() {
+		return terminateOnFailure;
 	}
 
 	public ArtifactGroup findDeployables(@NotNull final ArtifactHandlerManager artifactHandlerManager) {
@@ -116,7 +116,7 @@ public final class ArtifactGroup {
 					pomArtifact.getMetadataList().forEach(artifact::addMetadata);
 					return artifact;
 				}).forEachOrdered(artifact -> newDeployables.put(artifact.getFile().toPath().getFileName(), artifact));
-		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, newDeployables, this.indexed, this.failOnError);
+		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, newDeployables, this.indexed, this.terminateOnFailure);
 	}
 
 	public ArtifactGroup filteredByIndex(@NotNull final List<Path> indexed) {
@@ -128,7 +128,7 @@ public final class ArtifactGroup {
 				newDeployables.remove(indexPath);
 			}
 		}
-		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, newDeployables, newIndexed, this.failOnError);
+		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, newDeployables, newIndexed, this.terminateOnFailure);
 	}
 
 	public ArtifactGroup markFailOnError(final boolean failOnError) {
@@ -150,7 +150,7 @@ public final class ArtifactGroup {
 				", pomArtifact=" + pomArtifact +
 				", deployables=" + deployables +
 				", indexed=" + indexed +
-				", failOnError=" + failOnError +
+				", failOnError=" + terminateOnFailure +
 				'}';
 	}
 }

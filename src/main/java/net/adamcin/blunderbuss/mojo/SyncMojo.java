@@ -146,24 +146,42 @@ public class SyncMojo extends AbstractMojo {
 	 * Set to true to skip resolution of the latest index, which effectively forces the index to be rebuilt
 	 * from scratch. This does not prevent the index artifacts specified with {@code altIndex} from being resolved.
 	 */
-	@Parameter(name = "noResolveIndex", property = "noResolveIndex")
-	private boolean noResolveIndex;
+	@Parameter(name = "skipResolveIndex", property = "skipResolveIndex")
+	private boolean skipResolveIndex;
 
 	/**
 	 * Set to true to skip upload of the new index.
 	 */
-	@Parameter(name = "noDeployIndex", property = "noDeployIndex")
-	private boolean noDeployIndex;
+	@Parameter(name = "skipDeployIndex", property = "skipDeployIndex")
+	private boolean skipDeployIndex;
 
 	/**
-	 * Set to true to treat failures to deploy artifacts matching the GAV of any maven module navigable
-	 * from the active project as fatal errors, immediately terminating the execution.
+	 * By default, the plugin will tolerate any failures to deploy or resolve non-reactor artifacts and simply not update their coordinates in the
+	 * index, in which case the maven command will exit with a success as long as the upload of the index artifact is successful. Set this parameter
+	 * to false to exit maven with a failure if either the failure count is greater than zero or the index artifact upload fails. This does not
+	 * prevent the upload of the index artifact.
 	 */
-	@Parameter(name = "reactorMode", property = "reactorMode")
-	private boolean reactorMode;
+	@Parameter(name = "ignoreFailures", property = "ignoreFailures", defaultValue = "false")
+	private boolean ignoreFailures;
 
 	/**
-	 * Set to true to deploy reactor SNAPSHOT artifacts when {@code reactorMode} is also set to true.
+	 * Set to a positive integer to terminate the execution as soon as the same number of artifacts fail to deploy or resolve. Early termination
+	 * will prevent upload of the index artifact.
+	 */
+	@Parameter(name = "terminateAtFailureCount", property = "terminateAtFailureCount", defaultValue = "0")
+	private int terminateAtFailureCount;
+
+	/**
+	 * Set to true to treat failures to deploy artifacts matching the GAV of any maven module navigable from the active project as fatal errors,
+	 * immediately terminating the execution. This parameter has no effect when executed in a directory without a pom.
+	 */
+	@Parameter(name = "reactorAware", property = "reactorAware", defaultValue = "true")
+	private boolean reactorAware;
+
+	/**
+	 * Set to true to deploy reactor SNAPSHOT artifacts when {@code reactorMode} is also set to true. You must specify a snapshot-enabled deployment
+	 * repository either in the reactor, using {@code distributionManagement/snapshotRepository} or as a parameter, using
+	 * {@code altDeploymentRepository} or {@code altSnapshotDeploymentRepository}.
 	 */
 	@Parameter(name = "reactorDeploySnapshots", property = "reactorDeploySnapshots")
 	private boolean reactorDeploySnapshots;
@@ -385,15 +403,15 @@ public class SyncMojo extends AbstractMojo {
 		}
 	}
 
-	Single<ReactorFilter> getReactorFilter() {
+	Single<ReactorFilter> getReactorFilter(@NotNull final Context context) {
 		return Single.create(emitter -> {
-			if (!this.reactorMode || this.project == null || this.project.getCollectedProjects() == null) {
-				emitter.onSuccess(new ReactorFilter(Collections.emptyList(), false, reactorDeploySnapshots));
+			if (!this.reactorAware || this.session.getAllProjects() == null) {
+				emitter.onSuccess(new ReactorFilter(context, Collections.emptyList(), false, reactorDeploySnapshots));
 			} else {
-				final List<Gav> reactorGavs = this.project.getCollectedProjects().stream()
+				final List<Gav> reactorGavs = this.session.getAllProjects().stream()
 						.map(Gav::fromProject)
 						.collect(Collectors.toList());
-				emitter.onSuccess(new ReactorFilter(reactorGavs, this.reactorMode, reactorDeploySnapshots));
+				emitter.onSuccess(new ReactorFilter(context, reactorGavs, this.reactorAware, reactorDeploySnapshots));
 			}
 		});
 	}
@@ -404,7 +422,7 @@ public class SyncMojo extends AbstractMojo {
 	 * @return stream of GAV-grouped artifacts
 	 */
 	Flowable<ArtifactGroup> getDeployableArtifacts(@NotNull final Index index, @NotNull final Context context) {
-		return getReactorFilter()
+		return getReactorFilter(context)
 				.flatMap(reactorFilter -> getAltIndexes(context)
 						.flatMap(altIndexes -> Observable.concat(
 								Observable.just(reactorFilter),
@@ -449,7 +467,7 @@ public class SyncMojo extends AbstractMojo {
 	}
 
 	Single<Index> getIndex(@NotNull final Context context) {
-		return internalGetIndex(context, indexGroupId, indexArtifactId, !noResolveIndex);
+		return internalGetIndex(context, indexGroupId, indexArtifactId, !skipResolveIndex);
 	}
 
 	Single<Index> internalGetIndex(
@@ -506,9 +524,9 @@ public class SyncMojo extends AbstractMojo {
 	Completable doExecute() {
 		return getContext()
 				.flatMap(context -> getIndex(context)
-						.flatMap(index -> IndexBuilder.fromIndex(index, context)
+						.flatMap(index -> IndexBuilder.fromIndex(index, context, new IndexBuilder.Config(ignoreFailures, terminateAtFailureCount))
 								.flatMap(indexBuilder -> indexBuilder.buildIndexFrom(getDeployableArtifacts(index, context)))))
-				.flatMapCompletable(stats -> stats.getBuilder().finishAndUpload(stats, noDeployIndex));
+				.flatMapCompletable(stats -> stats.getBuilder().finishAndUpload(stats, skipDeployIndex));
 	}
 
 	@Override

@@ -19,7 +19,9 @@ package net.adamcin.blunderbuss.mojo;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Flowable;
 import io.reactivex.rxjava3.core.Single;
+import io.reactivex.rxjava3.functions.BiFunction;
 import io.reactivex.rxjava3.functions.Function;
+import io.reactivex.rxjava3.schedulers.Schedulers;
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.artifact.DefaultArtifact;
 import org.apache.maven.model.Model;
@@ -55,19 +57,45 @@ public final class IndexBuilder {
 
 	private final Context context;
 
-	public IndexBuilder(
+	private final boolean ignoreFailures;
+
+	private final int terminateAtFailureCount;
+
+	IndexBuilder(
 			@NotNull final Path indexDir,
 			@NotNull final Artifact indexBuilderArtifact,
 			@NotNull final Artifact indexBuilderMetadataArtifact,
-			@NotNull final Context context) {
+			@NotNull final Context context,
+			@NotNull final Config config) {
 		this.indexDir = indexDir;
 		this.indexBuilderArtifact = indexBuilderArtifact;
 		this.indexBuilderMetadataArtifact = indexBuilderMetadataArtifact;
 		this.indexGav = Gav.fromArtifact(indexBuilderArtifact);
 		this.context = context;
+		this.ignoreFailures = config.isIgnoreFailures();
+		this.terminateAtFailureCount = config.getTerminateAtFailureCount();
 	}
 
-	public static Single<IndexBuilder> fromIndex(@NotNull final Index index, @NotNull final Context context) {
+	public static class Config {
+		private final boolean ignoreFailures;
+
+		private final int terminateAtFailureCount;
+
+		public Config(final boolean ignoreFailures, final int terminateAtFailureCount) {
+			this.ignoreFailures = ignoreFailures;
+			this.terminateAtFailureCount = terminateAtFailureCount;
+		}
+
+		public boolean isIgnoreFailures() {
+			return ignoreFailures;
+		}
+
+		public int getTerminateAtFailureCount() {
+			return terminateAtFailureCount;
+		}
+	}
+
+	public static Single<IndexBuilder> fromIndex(@NotNull final Index index, @NotNull final Context context, @NotNull final Config config) {
 		return Single.create(emitter -> {
 			final Artifact indexArtifact = index.getIndexArtifact();
 			final Artifact indexMetadataArtifact = index.getIndexMetadataArtifact();
@@ -98,7 +126,7 @@ public final class IndexBuilder {
 			final Artifact indexBuilderMetadataArtifact = new DefaultArtifact(groupId, artifactId, version, indexMetadataArtifact.getScope(),
 					indexMetadataArtifact.getType(), indexMetadataArtifact.getClassifier(), indexMetadataArtifact.getArtifactHandler());
 			indexBuilderMetadataArtifact.setFile(pomFile);
-			emitter.onSuccess(new IndexBuilder(indexDir, indexBuilderArtifact, indexBuilderMetadataArtifact, context));
+			emitter.onSuccess(new IndexBuilder(indexDir, indexBuilderArtifact, indexBuilderMetadataArtifact, context, config));
 		});
 	}
 
@@ -111,18 +139,6 @@ public final class IndexBuilder {
 	private final Stats DIRTY = this.new Stats(0, true);
 
 	private final Stats FAILED = this.new Stats(1, false);
-
-	Stats noop() {
-		return NOOP;
-	}
-
-	Stats dirty() {
-		return DIRTY;
-	}
-
-	Stats failed() {
-		return FAILED;
-	}
 
 	public final class Stats {
 
@@ -162,6 +178,20 @@ public final class IndexBuilder {
 		}
 	}
 
+	BiFunction<Stats, Stats, Stats> getStatsReducer() {
+		if (terminateAtFailureCount > 0) {
+			return (left, right) -> {
+				final Stats combined = left.combine(right);
+				if (combined.getFailures() >= terminateAtFailureCount) {
+					throw new MojoFailureException(String.format("encountered at least %d sync failures", terminateAtFailureCount));
+				}
+				return combined;
+			};
+		} else {
+			return Stats::combine;
+		}
+	}
+
 	Function<ArtifactGroup, Stats> getUploadFunction() {
 		return artifactGroup -> {
 			final Set<Path> indexed = new HashSet<>(artifactGroup.getIndexed());
@@ -170,17 +200,19 @@ public final class IndexBuilder {
 					.collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 			// we never index snapshots, and we shouldn't overwrite index files if we don't have anything to upload
 			boolean doSave = artifactGroup.nonSnapshot() && !deployables.isEmpty();
-			Stats stats = noop();
+			Stats stats = NOOP;
 			if (!deployables.isEmpty()) {
 				try {
 					context.syncAll(artifactGroup.getGav(), deployables);
 					indexed.addAll(deployables.keySet());
 				} catch (Context.SyncFailure syncFailure) {
-					stats = failed();
-					doSave = false;
-					if (artifactGroup.isFailOnError()) {
-						throw new MojoFailureException("Required artifact failed to deploy: " + artifactGroup.getGav(),
-								syncFailure);
+					if (artifactGroup.isTerminateOnFailure()) {
+						throw new MojoFailureException("failed to sync required artifact: " + artifactGroup.getGav(), syncFailure);
+					} else {
+						context.getLog().warn("failed to sync artifact: " + artifactGroup.getGav());
+						context.getLog().debug("failed to sync artifact: " + artifactGroup.getGav(), syncFailure);
+						stats = FAILED;
+						doSave = false;
 					}
 				}
 			}
@@ -191,7 +223,7 @@ public final class IndexBuilder {
 				}
 				Files.write(indexFile, indexed.stream().map(Path::toString)
 						.collect(Collectors.toList()), StandardCharsets.UTF_8);
-				return dirty();
+				return DIRTY;
 			}
 			return stats;
 		};
@@ -200,9 +232,10 @@ public final class IndexBuilder {
 	Single<Stats> buildIndexFrom(@NotNull final Flowable<ArtifactGroup> artifactGroups) {
 		return artifactGroups
 				.parallel()
+				.runOn(Schedulers.io())
 				.map(getUploadFunction())
 				.sequential()
-				.reduce(noop(), Stats::combine);
+				.reduce(NOOP, getStatsReducer());
 	}
 
 	Completable finishAndUpload(@NotNull final Stats stats, final boolean noUpload) {
@@ -212,11 +245,15 @@ public final class IndexBuilder {
 						context.deploy(this.indexGav, this.getArtifacts());
 					}
 					if (stats.getFailures() > 0) {
-						emitter.onError(new MojoFailureException("Failed to upload or resolve at least " + stats.getFailures() + " artifacts."));
-					} else {
-						emitter.onComplete();
+						final String failureMessage = String.format("encountered %d artifact sync failures", stats.getFailures());
+						if (ignoreFailures) {
+							context.getLog().info(failureMessage);
+						} else {
+							emitter.onError(new MojoFailureException(failureMessage));
+						}
 					}
-				}));
+					emitter.onComplete();
+				})).subscribeOn(Schedulers.io());
 	}
 
 }
