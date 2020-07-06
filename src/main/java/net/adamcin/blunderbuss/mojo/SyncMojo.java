@@ -157,11 +157,12 @@ public class SyncMojo extends AbstractMojo {
 
 	/**
 	 * By default, the plugin will tolerate any failures to deploy or resolve non-reactor artifacts and simply not update their coordinates in the
-	 * index, in which case the maven command will exit with a success as long as the upload of the index artifact is successful. Set this parameter
-	 * to false to exit maven with a failure if either the failure count is greater than zero or the index artifact upload fails. This does not
-	 * prevent the upload of the index artifact.
+	 * index, and these sync failures will not prevent the plugin from attempting to upload the new index artifact at the end of the exeuction.
+	 * However, the maven command will exit with a failure if either the failure count is greater than zero or the index artifact upload
+	 * fails. Set this parameter to true to ignore sync failures and exit maven with a success as long as the upload of the index artifact is
+	 * successful.
 	 */
-	@Parameter(name = "ignoreFailures", property = "ignoreFailures", defaultValue = "false")
+	@Parameter(name = "ignoreFailures", property = "ignoreFailures")
 	private boolean ignoreFailures;
 
 	/**
@@ -467,10 +468,11 @@ public class SyncMojo extends AbstractMojo {
 	}
 
 	Single<Index> getIndex(@NotNull final Context context) {
-		return internalGetIndex(context, indexGroupId, indexArtifactId, !skipResolveIndex);
+		return internalGetIndex(artifactHandlerManager, context, indexGroupId, indexArtifactId, !skipResolveIndex);
 	}
 
-	Single<Index> internalGetIndex(
+	static Single<Index> internalGetIndex(
+			@NotNull final ArtifactHandlerManager artifactHandlerManager,
 			@NotNull final Context context,
 			@NotNull final String groupId,
 			@NotNull final String artifactId,
@@ -478,7 +480,7 @@ public class SyncMojo extends AbstractMojo {
 		return Single.create(emitter -> {
 			Artifact indexArtifact = new DefaultArtifact(groupId, artifactId, Artifact.LATEST_VERSION,
 					"test", "jar", "", artifactHandlerManager.getArtifactHandler("jar"));
-			Artifact indexMetadataArtifact = new DefaultArtifact(indexGroupId, indexArtifactId, Artifact.LATEST_VERSION,
+			Artifact indexMetadataArtifact = new DefaultArtifact(groupId, artifactId, Artifact.LATEST_VERSION,
 					"import", "pom", "", artifactHandlerManager.getArtifactHandler("pom"));
 
 			if (doResolve) {
@@ -495,7 +497,7 @@ public class SyncMojo extends AbstractMojo {
 				}
 			}
 
-			emitter.onSuccess(new Index(getLog(), indexArtifact, indexMetadataArtifact));
+			emitter.onSuccess(new Index(context.getLog(), indexArtifact, indexMetadataArtifact));
 		});
 	}
 
@@ -513,7 +515,7 @@ public class SyncMojo extends AbstractMojo {
 						if (groupId.equals(indexGroupId) && artifactId.equals(indexArtifactId)) {
 							return Observable.empty();
 						} else {
-							return internalGetIndex(context, groupId, artifactId, true)
+							return internalGetIndex(artifactHandlerManager, context, groupId, artifactId, true)
 									.toObservable();
 						}
 					})
