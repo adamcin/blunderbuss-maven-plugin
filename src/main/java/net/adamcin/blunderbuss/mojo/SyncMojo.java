@@ -130,6 +130,19 @@ public class SyncMojo extends AbstractMojo {
 	private String altReleaseDeploymentRepository;
 
 	/**
+	 * The alternative repository to use when the project has a snapshot version.
+	 *
+	 * <b>Note:</b> In maven-deploy-plugin version 2.x, the format was <code>id::<i>layout</i>::url</code> where <code><i>layout</i></code>
+	 * could be <code>default</code> (ie. Maven 2) or <code>legacy</code> (ie. Maven 1), but since 3.0.0 the layout part
+	 * has been removed because Maven 3 only supports Maven 2 repository layout.
+	 *
+	 * @see SyncMojo#altDeploymentRepository
+	 * @since 2.8
+	 */
+	@Parameter(property = "altSnapshotDeploymentRepository")
+	private String altSnapshotDeploymentRepository;
+
+	/**
 	 * Set to true to skip resolution of the latest index, which effectively forces the index to be rebuilt
 	 * from scratch. This does not prevent the index artifacts specified with {@code altIndex} from being resolved.
 	 */
@@ -141,6 +154,19 @@ public class SyncMojo extends AbstractMojo {
 	 */
 	@Parameter(name = "noDeployIndex", property = "noDeployIndex")
 	private boolean noDeployIndex;
+
+	/**
+	 * Set to true to treat failures to deploy artifacts matching the GAV of any maven module navigable
+	 * from the active project as fatal errors, immediately terminating the execution.
+	 */
+	@Parameter(name = "reactorMode", property = "reactorMode")
+	private boolean reactorMode;
+
+	/**
+	 * Set to true to deploy reactor SNAPSHOT artifacts when {@code reactorMode} is also set to true.
+	 */
+	@Parameter(name = "reactorDeploySnapshots", property = "reactorDeploySnapshots")
+	private boolean reactorDeploySnapshots;
 
 	/**
 	 * Specify the groupId of the index that is resolved and deployed by this execution. This also serves as the
@@ -221,9 +247,21 @@ public class SyncMojo extends AbstractMojo {
 	}
 
 	Maybe<ArtifactRepository> getAltReleaseDeploymentRepository() {
+		return getAltDeploymentRepository(false);
+	}
+
+	Maybe<ArtifactRepository> getAltSnapshotDeploymentRepository() {
+		return getAltDeploymentRepository(true);
+	}
+
+	Maybe<ArtifactRepository> getAltDeploymentRepository(final boolean forSnapshots) {
 		return Maybe.<Repository>create(emitter -> {
-			Optional<String> altRepo = Stream.of(altReleaseDeploymentRepository, altDeploymentRepository)
-					.filter(org.apache.maven.shared.utils.StringUtils::isNotBlank).findFirst();
+			final String specificKey = forSnapshots
+					? altSnapshotDeploymentRepository
+					: altReleaseDeploymentRepository;
+			final Optional<String> altRepo = Stream.of(specificKey, altDeploymentRepository)
+					.filter(org.apache.maven.shared.utils.StringUtils::isNotBlank)
+					.findFirst();
 			if (altRepo.isPresent()) {
 				final String altDeploymentRepo = altRepo.get();
 				getLog().info("Using alternate deployment repository " + altDeploymentRepo);
@@ -238,8 +276,8 @@ public class SyncMojo extends AbstractMojo {
 					final String id = matcher.group(1).trim();
 					final String url = matcher.group(2).trim();
 					Repository repo = new Repository();
-					repo.setReleases(getDefaultRepositoryPolicy(true));
-					repo.setSnapshots(getDefaultRepositoryPolicy(false));
+					repo.setReleases(getDefaultRepositoryPolicy(!forSnapshots));
+					repo.setSnapshots(getDefaultRepositoryPolicy(forSnapshots));
 					repo.setId(id);
 					repo.setUrl(url);
 					emitter.onSuccess(repo);
@@ -294,6 +332,23 @@ public class SyncMojo extends AbstractMojo {
 		return getAltReleaseDeploymentRepository().switchIfEmpty(getProjectReleaseDeploymentRepository());
 	}
 
+	Maybe<ArtifactRepository> getProjectSnapshotDeploymentRepository() {
+		return getProjectDistMgmtAsSingle().flatMapMaybe(distMgmt -> Maybe.<DeploymentRepository>create(emitter -> {
+			if (distMgmt.getSnapshotRepository() != null) {
+				emitter.onSuccess(distMgmt.getSnapshotRepository());
+			} else {
+				emitter.onComplete();
+			}
+		})).flatMap(repository -> buildArtifactRepository(repository)
+				.onErrorResumeNext(e ->
+						Single.error(new IllegalStateException("Failed to create snapshot distribution repository for " + project.getId(), e))
+				).toMaybe());
+	}
+
+	Maybe<ArtifactRepository> getSnapshotDeploymentRepository() {
+		return getAltSnapshotDeploymentRepository().switchIfEmpty(getProjectSnapshotDeploymentRepository());
+	}
+
 	/**
 	 * @return an observable of artifact groups
 	 */
@@ -307,7 +362,7 @@ public class SyncMojo extends AbstractMojo {
 					if (file.toString().endsWith(".pom")) {
 						final String artifactId = file.getParent().getParent().toFile().getName();
 						final String version = file.getParent().toFile().getName();
-						if (!version.endsWith("-SNAPSHOT") && file.toString().endsWith(artifactId + "-" + version + ".pom")) {
+						if (file.toString().endsWith(artifactId + "-" + version + ".pom")) {
 							final String groupId = localRepoPath.relativize(file.getParent().getParent().getParent())
 									.toString().replace('/', '.');
 							final DefaultArtifact artifact = new DefaultArtifact(groupId, artifactId, version,
@@ -330,32 +385,52 @@ public class SyncMojo extends AbstractMojo {
 		}
 	}
 
+	Single<ReactorFilter> getReactorFilter() {
+		return Single.create(emitter -> {
+			if (!this.reactorMode || this.project == null || this.project.getCollectedProjects() == null) {
+				emitter.onSuccess(new ReactorFilter(Collections.emptyList(), false, reactorDeploySnapshots));
+			} else {
+				final List<Gav> reactorGavs = this.project.getCollectedProjects().stream()
+						.map(Gav::fromProject)
+						.collect(Collectors.toList());
+				emitter.onSuccess(new ReactorFilter(reactorGavs, this.reactorMode, reactorDeploySnapshots));
+			}
+		});
+	}
+
 	/**
 	 * Stream deployable artifacts grouped into lists where all elements share the same GAV coordinates.
 	 *
 	 * @return stream of GAV-grouped artifacts
 	 */
-	Flowable<ArtifactGroup> getDeployableArtifacts(@NotNull final Index index, @NotNull final List<Index> altIndexes) {
-		return Observable.concat(Observable.just(index), Observable.fromIterable(altIndexes))
-				.reduce(getArtifactGroups().toFlowable(BackpressureStrategy.BUFFER), (flow, idx) -> idx.filterByIndex(flow))
+	Flowable<ArtifactGroup> getDeployableArtifacts(@NotNull final Index index, @NotNull final Context context) {
+		return getReactorFilter()
+				.flatMap(reactorFilter -> getAltIndexes(context)
+						.flatMap(altIndexes -> Observable.concat(
+								Observable.just(reactorFilter),
+								Observable.just(index),
+								Observable.fromIterable(altIndexes))
+								.reduce(getArtifactGroups().toFlowable(BackpressureStrategy.BUFFER),
+										(flow, idx) -> idx.attachPipe(flow))))
 				.toFlowable()
 				.flatMap(Functions.identity())
 				.map(group -> group.findDeployables(artifactHandlerManager));
 	}
 
 	Single<ProjectBuildingRequest> getWrappedProjectBuildingRequest(
-			@NotNull final ArtifactRepository deployRepo) {
+			@NotNull final ArtifactRepository releaseRepo) {
 		DefaultProjectBuildingRequest wrapper = new DefaultProjectBuildingRequest(session.getProjectBuildingRequest());
-		wrapper.setRemoteRepositories(Collections.singletonList(deployRepo));
+		wrapper.setRemoteRepositories(Collections.singletonList(releaseRepo));
 		return Single.just(wrapper);
 	}
 
 	Single<Context> getContext() {
-		return getReleaseDeploymentRepository()
-				.flatMap(deployRepo -> getWrappedProjectBuildingRequest(deployRepo)
-						.flatMap(buildRequest -> getTempDirectory()
-								.map(tempDir -> new Context(artifactResolver, artifactDeployer,
-										deployRepo, buildRequest, tempDir.toAbsolutePath(), getLog()))));
+		return getSnapshotDeploymentRepository().map(Optional::of).defaultIfEmpty(Optional.empty())
+				.flatMap(snapshotRepo -> getReleaseDeploymentRepository()
+						.flatMap(releaseRepo -> getWrappedProjectBuildingRequest(releaseRepo)
+								.flatMap(buildRequest -> getTempDirectory()
+										.map(tempDir -> new Context(artifactResolver, artifactDeployer, releaseRepo,
+												snapshotRepo.orElse(null), buildRequest, tempDir.toAbsolutePath(), getLog())))));
 	}
 
 	Single<Path> getTempDirectory() {
@@ -432,10 +507,8 @@ public class SyncMojo extends AbstractMojo {
 		return getContext()
 				.flatMap(context -> getIndex(context)
 						.flatMap(index -> IndexBuilder.fromIndex(index, context)
-								.flatMap(indexBuilder -> getAltIndexes(context)
-										.map(altIndexes -> indexBuilder.buildIndexFrom(getDeployableArtifacts(index, altIndexes))
-												.andThen(indexBuilder.finishAndUpload(noDeployIndex))))))
-				.flatMapCompletable(Functions.identity());
+								.flatMap(indexBuilder -> indexBuilder.buildIndexFrom(getDeployableArtifacts(index, context)))))
+				.flatMapCompletable(stats -> stats.getBuilder().finishAndUpload(stats, noDeployIndex));
 	}
 
 	@Override

@@ -36,23 +36,30 @@ public final class ArtifactGroup {
 
 	private final Artifact pomArtifact;
 
+	private final Gav gav;
+
 	private final Map<Path, Artifact> deployables;
 
 	private final Set<Path> indexed;
 
+	private final boolean failOnError;
+
 	public ArtifactGroup(@NotNull final Path layoutPrefix, @NotNull final Artifact pomArtifact) {
-		this(layoutPrefix, pomArtifact, Collections.emptyMap(), Collections.emptySet());
+		this(layoutPrefix, pomArtifact, Collections.emptyMap(), Collections.emptySet(), false);
 	}
 
 	public ArtifactGroup(
 			@NotNull final Path layoutPrefix,
 			@NotNull final Artifact pomArtifact,
 			@NotNull final Map<Path, Artifact> deployables,
-			@NotNull final Set<Path> indexed) {
+			@NotNull final Set<Path> indexed,
+			final boolean failOnError) {
 		this.layoutPrefix = layoutPrefix;
 		this.pomArtifact = pomArtifact;
+		this.gav = Gav.fromArtifact(pomArtifact);
 		this.deployables = Collections.unmodifiableMap(deployables);
 		this.indexed = Collections.unmodifiableSet(indexed);
+		this.failOnError = failOnError;
 	}
 
 	public Path getLayoutPrefix() {
@@ -71,12 +78,20 @@ public final class ArtifactGroup {
 		return pomArtifact;
 	}
 
+	public Gav getGav() {
+		return gav;
+	}
+
 	public Map<Path, Artifact> getDeployables() {
 		return deployables;
 	}
 
 	public Set<Path> getIndexed() {
 		return indexed;
+	}
+
+	public boolean isFailOnError() {
+		return failOnError;
 	}
 
 	public ArtifactGroup findDeployables(@NotNull final ArtifactHandlerManager artifactHandlerManager) {
@@ -101,7 +116,7 @@ public final class ArtifactGroup {
 					pomArtifact.getMetadataList().forEach(artifact::addMetadata);
 					return artifact;
 				}).forEachOrdered(artifact -> newDeployables.put(artifact.getFile().toPath().getFileName(), artifact));
-		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, newDeployables, this.indexed);
+		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, newDeployables, this.indexed, this.failOnError);
 	}
 
 	public ArtifactGroup filteredByIndex(@NotNull final List<Path> indexed) {
@@ -113,7 +128,19 @@ public final class ArtifactGroup {
 				newDeployables.remove(indexPath);
 			}
 		}
-		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, newDeployables, newIndexed);
+		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, newDeployables, newIndexed, this.failOnError);
+	}
+
+	public ArtifactGroup markFailOnError(final boolean failOnError) {
+		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, this.deployables, this.indexed, failOnError);
+	}
+
+	public boolean isSnapshot() {
+		return getPomArtifact().isSnapshot();
+	}
+
+	public boolean nonSnapshot() {
+		return !isSnapshot();
 	}
 
 	@Override
@@ -123,6 +150,7 @@ public final class ArtifactGroup {
 				", pomArtifact=" + pomArtifact +
 				", deployables=" + deployables +
 				", indexed=" + indexed +
+				", failOnError=" + failOnError +
 				'}';
 	}
 }

@@ -38,7 +38,7 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.stream.Collectors;
 
-public class Index {
+public class Index implements ArtifactPipe {
 	private final Log log;
 
 	private final Artifact indexArtifact;
@@ -87,7 +87,9 @@ public class Index {
 		};
 	}
 
-	public Flowable<ArtifactGroup> filterByIndex(@NotNull final Flowable<ArtifactGroup> artifactGroups) {
+	@Override
+	@NotNull
+	public Flowable<ArtifactGroup> attachPipe(@NotNull final Flowable<ArtifactGroup> artifactGroups) {
 		if (indexArtifact.getFile() == null) {
 			return artifactGroups.filter(getNotMyselfPredicate());
 		}
