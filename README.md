@@ -47,7 +47,7 @@ discarded after every build, so this is less of risk.
 First, be sure that your maven settings.xml is properly configured to authenticate with the target repository and that your local maven 
 repository is as clean as you want the target repository to be. Then you can execute the plugin directly:
 
-    mvn net.adamcin:blunderbuss-maven-plugin:0.3.0:sync \
+    mvn net.adamcin:blunderbuss-maven-plugin:0.4.0:sync \
         -DindexGroupId=com.myorg1.ado \
         -DindexArtifactId=my-index \
         -DaltDeploymentRepository=MyFeedInOrg1::https://pkgs.dev.azure.com/OrganzationName/ProjectName/_packaging/MyProjectScopedFeed1/Maven/v1
@@ -65,7 +65,7 @@ For example, after adding the following to your pom, it configures the plugin wi
             <plugin>
                 <groupId>net.adamcin</groupId>
                 <artifactId>blunderbuss-maven-plugin</artifactId>
-                <version>0.3.0</version>
+                <version>0.4.0</version>
                 <configuration>
                     <indexGroupId>com.myorg1.ado</indexGroupId>
                     <indexArtifactId>my-index</indexArtifactId>
