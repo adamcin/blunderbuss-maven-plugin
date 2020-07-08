@@ -32,7 +32,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Map;
 
-class Context {
+public final class Context {
 	private final @NotNull ArtifactResolver artifactResolver;
 
 	private final @NotNull ArtifactDeployer artifactDeployer;

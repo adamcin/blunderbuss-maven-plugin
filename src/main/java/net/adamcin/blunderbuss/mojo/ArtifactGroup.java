@@ -70,10 +70,6 @@ public final class ArtifactGroup {
 		return layoutPrefix.getParent().resolve(layoutPrefix.getFileName().toString() + ".txt");
 	}
 
-	public String getFilenamePrefix() {
-		return pomArtifact.getArtifactId() + "-" + pomArtifact.getVersion();
-	}
-
 	public Artifact getPomArtifact() {
 		return pomArtifact;
 	}
@@ -150,7 +146,7 @@ public final class ArtifactGroup {
 				", pomArtifact=" + pomArtifact +
 				", deployables=" + deployables +
 				", indexed=" + indexed +
-				", failOnError=" + terminateOnFailure +
+				", terminateOnFailure=" + terminateOnFailure +
 				'}';
 	}
 }

@@ -8,7 +8,9 @@ import java.util.Objects;
 
 public final class Gav {
 	private final @NotNull String groupId;
+
 	private final @NotNull String artifactId;
+
 	private final @NotNull String version;
 
 	public Gav(@NotNull final String groupId, @NotNull final String artifactId, @NotNull final String version) {
@@ -35,10 +37,12 @@ public final class Gav {
 
 	@Override
 	public boolean equals(final Object o) {
-		if (this == o)
+		if (this == o) {
 			return true;
-		if (o == null || getClass() != o.getClass())
+		}
+		if (o == null || getClass() != o.getClass()) {
 			return false;
+		}
 		final Gav gav = (Gav) o;
 		return groupId.equals(gav.groupId) &&
 				artifactId.equals(gav.artifactId) &&

@@ -56,12 +56,8 @@ import org.codehaus.plexus.util.StringUtils;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
-import java.io.IOException;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -375,26 +371,7 @@ public class SyncMojo extends AbstractMojo {
 		Observable<ArtifactGroup> observable = Observable.create(emitter -> {
 			final Path localRepoPath = session.getRequest().getLocalRepositoryPath().toPath().toAbsolutePath();
 			final ArtifactHandler artifactHandler = artifactHandlerManager.getArtifactHandler("pom");
-			Files.walkFileTree(localRepoPath, new SimpleFileVisitor<Path>() {
-				@Override
-				public FileVisitResult visitFile(final Path file, final BasicFileAttributes attrs) throws IOException {
-					if (file.toString().endsWith(".pom")) {
-						final String artifactId = file.getParent().getParent().toFile().getName();
-						final String version = file.getParent().toFile().getName();
-						if (file.toString().endsWith(artifactId + "-" + version + ".pom")) {
-							final String groupId = localRepoPath.relativize(file.getParent().getParent().getParent())
-									.toString().replace('/', '.');
-							final DefaultArtifact artifact = new DefaultArtifact(groupId, artifactId, version,
-									"import", "pom", null, artifactHandler);
-							artifact.setFile(file.toFile());
-							artifact.addMetadata(new ArtifactRepositoryMetadata(artifact));
-							emitter.onNext(new ArtifactGroup(localRepoPath.relativize(file.getParent()), artifact));
-							return FileVisitResult.SKIP_SIBLINGS;
-						}
-					}
-					return FileVisitResult.CONTINUE;
-				}
-			});
+			CachedArtifactVisitor.walkLocalRepo(artifactHandler, localRepoPath, emitter);
 			emitter.onComplete();
 		});
 		if (limitArtifactCount > 0L) {

@@ -17,6 +17,7 @@
 package net.adamcin.blunderbuss.mojo;
 
 import io.reactivex.rxjava3.core.Completable;
+import io.reactivex.rxjava3.functions.Supplier;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.filefilter.IOFileFilter;
@@ -31,16 +32,17 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collections;
 import java.util.Enumeration;
-import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
 import java.util.regex.Pattern;
 
-public class JarUtils {
+public final class JarUtils {
+	private JarUtils() {
+		// no construction
+	}
 
 	static Completable extractJarFile(@NotNull final File srcJar, @NotNull final Path pathIsRoot) {
 		return Completable.create(emitter -> {
@@ -49,24 +51,20 @@ public class JarUtils {
 					JarEntry entry = entries.nextElement();
 					final String relPath = entry.getName()
 							.replaceFirst("^/*", "")
-							.replaceFirst("/?$", "")
-							.replaceAll(Pattern.quote("/"), File.separator);
-					if (relPath.isEmpty()) {
-						continue;
-					}
-					final Path entryPath = pathIsRoot.resolve(relPath);
-					if (entry.isDirectory()) {
-						Files.createDirectories(entryPath);
-					} else {
-						Files.createDirectories(entryPath.getParent());
-						try (InputStream contents = jarFile.getInputStream(entry);
-							 OutputStream fos = new FileOutputStream(entryPath.toFile())) {
-							IOUtils.copy(contents, fos);
+							.replaceFirst("/?$", "");
+					if (!relPath.isEmpty()) {
+						final Path entryPath = pathIsRoot.resolve(relPath);
+						if (entry.isDirectory()) {
+							Files.createDirectories(entryPath);
+						} else {
+							Files.createDirectories(entryPath.getParent());
+							try (InputStream contents = jarFile.getInputStream(entry);
+								 OutputStream fos = new FileOutputStream(entryPath.toFile())) {
+								IOUtils.copy(contents, fos);
+							}
 						}
 					}
 				}
-			} catch (Exception e) {
-				emitter.onError(e);
 			}
 			emitter.onComplete();
 		});
@@ -85,8 +83,7 @@ public class JarUtils {
 	};
 
 	static void buildJarOutputStreamFromDir(final @NotNull File srcDir,
-			final @NotNull JarOutputStream jos,
-			final @NotNull Map<String, File> additionalEntries) throws IOException {
+			final @NotNull JarOutputStream jos) throws IOException {
 		final String absPath = srcDir.getAbsolutePath();
 		for (File file : FileUtils.listFilesAndDirs(srcDir, includedEntry, TrueFileFilter.INSTANCE)) {
 			final String filePath = file.getAbsolutePath();
@@ -110,52 +107,30 @@ public class JarUtils {
 			}
 			jos.closeEntry();
 		}
-		for (Map.Entry<String, File> add : additionalEntries.entrySet()) {
-			final String entryName = add.getKey();
-			if (entryName.isEmpty()) {
-				continue;
-			}
-			if (add.getValue().isDirectory()) {
-				JarEntry entry = new JarEntry(entryName.replaceFirst("/?$", "/"));
-				entry.setTime(add.getValue().lastModified());
-				jos.putNextEntry(entry);
-			} else {
-				JarEntry entry = new JarEntry(entryName.replaceFirst("/?$", ""));
-				entry.setTime(add.getValue().lastModified());
-				jos.putNextEntry(entry);
-				try (FileInputStream fileInput = new FileInputStream(add.getValue())) {
-					IOUtils.copy(fileInput, jos);
-				}
-			}
-			jos.closeEntry();
-		}
 	}
 
 	static Completable createJarFile(@NotNull final File targetJar, @NotNull final Path pathIsRoot) {
-		final Map<String, File> additionalEntries = Collections.emptyMap();
 		return Completable.create(emitter -> {
 			final File targetDir = targetJar.getParentFile();
 			if (!targetDir.isDirectory() && !targetDir.mkdirs()) {
-				emitter.onError(new IOException("failed to create parent target directory: " + targetDir.getAbsolutePath()));
+				throw new IOException("failed to create parent target directory: " + targetDir.getAbsolutePath());
 			}
-			final File manifestFile = pathIsRoot.resolve(JarFile.MANIFEST_NAME.replaceAll(Pattern.quote("/"), File.separator)).toFile();
-			if (manifestFile.exists()) {
-				try (InputStream manIn = new FileInputStream(manifestFile)) {
-					final Manifest man = new Manifest(manIn);
-					try (JarOutputStream jos = new JarOutputStream(new FileOutputStream(targetJar), man)) {
-						buildJarOutputStreamFromDir(pathIsRoot.toFile(), jos, additionalEntries);
-					} catch (Exception e) {
-						emitter.onError(e);
+			final File manifestFile = pathIsRoot.resolve(JarFile.MANIFEST_NAME).toFile();
+			final Supplier<JarOutputStream> jarOut = () -> {
+				if (manifestFile.exists()) {
+					try (InputStream manIn = new FileInputStream(manifestFile)) {
+						final Manifest man = new Manifest(manIn);
+						return new JarOutputStream(new FileOutputStream(targetJar), man);
 					}
+				} else {
+					return new JarOutputStream(new FileOutputStream(targetJar));
 				}
-			} else {
-				try (JarOutputStream jos = new JarOutputStream(new FileOutputStream(targetJar))) {
-					buildJarOutputStreamFromDir(pathIsRoot.toFile(), jos, additionalEntries);
-				} catch (Exception e) {
-					emitter.onError(e);
-				}
+			};
+			try (JarOutputStream jos = jarOut.get()) {
+				buildJarOutputStreamFromDir(pathIsRoot.toFile(), jos);
 			}
 			emitter.onComplete();
 		});
 	}
+
 }
