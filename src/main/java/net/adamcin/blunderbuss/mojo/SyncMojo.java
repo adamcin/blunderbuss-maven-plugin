@@ -26,8 +26,6 @@ import io.reactivex.rxjava3.internal.functions.Functions;
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.artifact.DefaultArtifact;
 import org.apache.maven.artifact.InvalidRepositoryException;
-import org.apache.maven.artifact.handler.ArtifactHandler;
-import org.apache.maven.artifact.handler.DefaultArtifactHandler;
 import org.apache.maven.artifact.handler.manager.ArtifactHandlerManager;
 import org.apache.maven.artifact.repository.ArtifactRepository;
 import org.apache.maven.artifact.repository.ArtifactRepositoryPolicy;
@@ -60,7 +58,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -234,24 +231,7 @@ public class SyncMojo extends AbstractMojo {
 	@Component
 	private ArtifactResolver artifactResolver;
 
-	private final ArtifactHandlerManager artifactHandlerManager = new ArtifactHandlerManager() {
-		private final Map<String, ArtifactHandler> handlers = new HashMap<>();
-
-		@Override
-		public ArtifactHandler getArtifactHandler(final String type) {
-			if (!handlers.containsKey(type)) {
-				synchronized (handlers) {
-					DefaultArtifactHandler handler = new DefaultArtifactHandler(type);
-					handler.setExtension(type);
-					handlers.put(type, handler);
-				}
-			}
-			return handlers.get(type);
-		}
-
-		@Override
-		public void addHandlers(final Map<String, ArtifactHandler> handlers) { /* do nothing */ }
-	};
+	private final ArtifactHandlerManager artifactHandlerManager = new DefaultArtifactHandlers();
 
 	RepositoryPolicy getDefaultRepositoryPolicy(boolean enabled) {
 		RepositoryPolicy policy = new RepositoryPolicy();
@@ -280,13 +260,10 @@ public class SyncMojo extends AbstractMojo {
 			if (altRepo.isPresent()) {
 				final String altDeploymentRepo = altRepo.get();
 				getLog().info("Using alternate deployment repository " + altDeploymentRepo);
-
 				Matcher matcher = ALT_REPO_SYNTAX_PATTERN.matcher(altDeploymentRepo);
-
 				if (!matcher.matches()) {
-					emitter.onError(new MojoFailureException(altDeploymentRepo, "Invalid syntax for repository.",
-							"Invalid syntax for alternative repository. Use \"id::url\"."));
-					return;
+					throw new MojoFailureException(altDeploymentRepo, "Invalid syntax for repository.",
+							"Invalid syntax for alternative repository. Use \"id::url\".");
 				} else {
 					final String id = matcher.group(1).trim();
 					final String url = matcher.group(2).trim();
@@ -304,13 +281,13 @@ public class SyncMojo extends AbstractMojo {
 
 	Single<ArtifactRepository> buildArtifactRepository(@NotNull final Repository repository) {
 		return Single.create(emitter -> {
-			if (!StringUtils.isEmpty(repository.getId()) && !StringUtils.isEmpty(repository.getUrl())) {
+			if (StringUtils.isEmpty(repository.getId()) || StringUtils.isEmpty(repository.getUrl())) {
+				throw new InvalidRepositoryException("repository id and url must not be empty", repository.getId());
+			} else {
 				ArtifactRepository repo = repositorySystem.buildArtifactRepository(repository);
 				repositorySystem.injectProxy(session.getRepositorySession(), Collections.singletonList(repo));
 				repositorySystem.injectAuthentication(session.getRepositorySession(), Collections.singletonList(repo));
 				emitter.onSuccess(repo);
-			} else {
-				emitter.onError(new InvalidRepositoryException("repository id and url must not be empty", repository.getId()));
 			}
 		});
 	}
@@ -318,13 +295,13 @@ public class SyncMojo extends AbstractMojo {
 	Single<DistributionManagement> getProjectDistMgmtAsSingle() {
 		return Single.<MavenProject>create(emitter -> {
 			if (project == null) {
-				emitter.onError(new IllegalStateException("No maven project available."));
+				throw new IllegalStateException("No maven project available.");
 			} else {
 				emitter.onSuccess(project);
 			}
 		}).flatMap(mavenProject -> Single.create(emitter -> {
 			if (mavenProject.getDistributionManagement() == null) {
-				emitter.onError(new IllegalStateException("Maven project does not contain a distributionManagement section"));
+				throw new IllegalStateException("Maven project does not contain a distributionManagement section");
 			} else {
 				emitter.onSuccess(mavenProject.getDistributionManagement());
 			}
@@ -334,7 +311,7 @@ public class SyncMojo extends AbstractMojo {
 	Single<ArtifactRepository> getProjectReleaseDeploymentRepository() {
 		return getProjectDistMgmtAsSingle().flatMap(distMgmt -> Single.<DeploymentRepository>create(emitter -> {
 			if (distMgmt.getRepository() == null) {
-				emitter.onError(new IllegalStateException("Maven project distributionManagement does not specify a release repository"));
+				throw new IllegalStateException("Maven project distributionManagement does not specify a release repository");
 			} else {
 				emitter.onSuccess(distMgmt.getRepository());
 			}
@@ -370,9 +347,7 @@ public class SyncMojo extends AbstractMojo {
 	Observable<ArtifactGroup> getArtifactGroups() {
 		Observable<ArtifactGroup> observable = Observable.create(emitter -> {
 			final Path localRepoPath = session.getRequest().getLocalRepositoryPath().toPath().toAbsolutePath();
-			final ArtifactHandler artifactHandler = artifactHandlerManager.getArtifactHandler("pom");
-			CachedArtifactVisitor.walkLocalRepo(artifactHandler, localRepoPath, emitter);
-			emitter.onComplete();
+			CachedArtifactVisitor.walkLocalRepo(artifactHandlerManager, localRepoPath, emitter).onComplete();
 		});
 		if (limitArtifactCount > 0L) {
 			return observable.take(limitArtifactCount);

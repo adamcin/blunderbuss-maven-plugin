@@ -3,6 +3,7 @@ package net.adamcin.blunderbuss.mojo;
 import io.reactivex.rxjava3.core.Emitter;
 import org.apache.maven.artifact.DefaultArtifact;
 import org.apache.maven.artifact.handler.ArtifactHandler;
+import org.apache.maven.artifact.handler.manager.ArtifactHandlerManager;
 import org.apache.maven.artifact.repository.metadata.ArtifactRepositoryMetadata;
 import org.jetbrains.annotations.NotNull;
 
@@ -13,7 +14,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 
-public class CachedArtifactVisitor extends SimpleFileVisitor<Path> {
+public final class CachedArtifactVisitor extends SimpleFileVisitor<Path> {
 	private final ArtifactHandler pomArtifactHandler;
 
 	private final Path localRepoPath;
@@ -48,10 +49,13 @@ public class CachedArtifactVisitor extends SimpleFileVisitor<Path> {
 		return FileVisitResult.CONTINUE;
 	}
 
-	public static void walkLocalRepo(
-			@NotNull final ArtifactHandler pomArtifactHandler,
+	public static <E extends Emitter<ArtifactGroup>> E walkLocalRepo(
+			@NotNull final ArtifactHandlerManager artifactHandlerManager,
 			@NotNull final Path localRepoPath,
-			@NotNull final Emitter<ArtifactGroup> emitter) throws IOException {
-		Files.walkFileTree(localRepoPath, new CachedArtifactVisitor(pomArtifactHandler, localRepoPath, emitter));
+			@NotNull final E emitter) throws IOException {
+		Files.walkFileTree(localRepoPath,
+				new CachedArtifactVisitor(artifactHandlerManager.getArtifactHandler("pom"),
+						localRepoPath, emitter));
+		return emitter;
 	}
 }

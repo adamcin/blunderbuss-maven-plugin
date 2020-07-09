@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class GavTest {
+class GavTest {
 
 	@ParameterizedTest(name = "Gav fromArtifact {0}:{1}:{2}")
 	@CsvSource({
