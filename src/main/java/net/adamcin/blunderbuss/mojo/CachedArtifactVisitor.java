@@ -15,6 +15,10 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 
 public final class CachedArtifactVisitor extends SimpleFileVisitor<Path> {
+	private static final String POM_TYPE = "pom";
+
+	private static final String POM_EXT = "." + POM_TYPE;
+
 	private final ArtifactHandler pomArtifactHandler;
 
 	private final Path localRepoPath;
@@ -32,14 +36,14 @@ public final class CachedArtifactVisitor extends SimpleFileVisitor<Path> {
 
 	@Override
 	public FileVisitResult visitFile(final Path file, final BasicFileAttributes attrs) throws IOException {
-		if (file.toString().endsWith(".pom")) {
+		if (file.toString().endsWith(POM_EXT)) {
 			final String artifactId = file.getParent().getParent().toFile().getName();
 			final String version = file.getParent().toFile().getName();
-			if (file.toString().endsWith(artifactId + "-" + version + ".pom")) {
+			if (file.toString().endsWith(artifactId + "-" + version + POM_EXT)) {
 				final String groupId = localRepoPath.relativize(file.getParent().getParent().getParent())
 						.toString().replace('/', '.');
 				final DefaultArtifact artifact = new DefaultArtifact(groupId, artifactId, version,
-						"import", "pom", null, pomArtifactHandler);
+						"import", POM_TYPE, null, pomArtifactHandler);
 				artifact.setFile(file.toFile());
 				artifact.addMetadata(new ArtifactRepositoryMetadata(artifact));
 				emitter.onNext(new ArtifactGroup(localRepoPath.relativize(file.getParent()), artifact));
@@ -54,7 +58,7 @@ public final class CachedArtifactVisitor extends SimpleFileVisitor<Path> {
 			@NotNull final Path localRepoPath,
 			@NotNull final E emitter) throws IOException {
 		Files.walkFileTree(localRepoPath,
-				new CachedArtifactVisitor(artifactHandlerManager.getArtifactHandler("pom"),
+				new CachedArtifactVisitor(artifactHandlerManager.getArtifactHandler(POM_TYPE),
 						localRepoPath, emitter));
 		return emitter;
 	}

@@ -35,7 +35,7 @@ public final class ReactorFilter implements ArtifactPipe {
 
 	ArtifactGroup transformReactorArtifact(@NotNull final ArtifactGroup artifactGroup) {
 		if (reactorAware && isReactorDeployable(artifactGroup)) {
-			return artifactGroup.markFailOnError(true);
+			return artifactGroup.markTerminateOnFailure(true);
 		}
 		return artifactGroup;
 	}

@@ -38,7 +38,7 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.stream.Collectors;
 
-public class Index implements ArtifactPipe {
+public final class Index implements ArtifactPipe {
 	private final Log log;
 
 	private final Artifact indexArtifact;

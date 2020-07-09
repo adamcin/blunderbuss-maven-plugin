@@ -127,8 +127,8 @@ public final class ArtifactGroup {
 		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, newDeployables, newIndexed, this.terminateOnFailure);
 	}
 
-	public ArtifactGroup markFailOnError(final boolean failOnError) {
-		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, this.deployables, this.indexed, failOnError);
+	public ArtifactGroup markTerminateOnFailure(final boolean terminateOnFailure) {
+		return new ArtifactGroup(this.layoutPrefix, this.pomArtifact, this.deployables, this.indexed, terminateOnFailure);
 	}
 
 	public boolean isSnapshot() {
@@ -139,14 +139,4 @@ public final class ArtifactGroup {
 		return !isSnapshot();
 	}
 
-	@Override
-	public String toString() {
-		return "ArtifactGroup{" +
-				"layoutPrefix=" + layoutPrefix +
-				", pomArtifact=" + pomArtifact +
-				", deployables=" + deployables +
-				", indexed=" + indexed +
-				", terminateOnFailure=" + terminateOnFailure +
-				'}';
-	}
 }

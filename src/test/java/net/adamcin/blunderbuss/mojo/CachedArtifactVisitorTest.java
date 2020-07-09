@@ -17,7 +17,7 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class CachedArtifactVisitorTest {
-	final Path baseDir = Paths.get("target", "test-out", "CachedArtifactVisitorTest").toAbsolutePath();
+	final Path baseDir = Paths.get("target", "test-out", getClass().getSimpleName()).toAbsolutePath();
 
 	private DefaultArtifactHandlers handlers = new DefaultArtifactHandlers();
 

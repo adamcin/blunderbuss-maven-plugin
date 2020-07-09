@@ -27,8 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JarUtilsTest {
-
-	final Path baseDir = Paths.get("target", "test-out", "JarUtilsTest").toAbsolutePath();
+	final Path baseDir = Paths.get("target", "test-out", getClass().getSimpleName()).toAbsolutePath();
 
 	@BeforeEach
 	void setUp() throws Exception {
